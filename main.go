@@ -73,8 +73,16 @@ func main() {
 				log.Fatal(e)
 			}
 		}
-		log.Println("jaoweb-docsが未ダウンロードのため、git cloneによるダウンロードを行います")
-		execCommandStdout("git", "clone", "https://github.com/jaoafa/jaoweb-docs", "content").Run()
+		log.Println("jaoweb-docsが未ダウンロードのため、git cloneによるダウンロードを行います。")
+		log.Println("フォーク先のリポジトリをクローンするため、あなたのGitHubアカウント名を入力してください。（事前にフォークする必要があります）")
+		log.Print("あなたのGitHubアカウント名: ")
+		var owner string
+		fmt.Scan(&owner)
+
+		log.Println(owner + "/jaoweb-docs からクローンします。")
+		execCommandStdout("git", "clone", "https://github.com/"+owner+"/jaoweb-docs", "content").Run()
+		log.Println("upstreamリモートを追加します。")
+		execCommandStdout("git", "remote", "add", "upstream", "https://github.com/jaoafa/jaoweb-docs")
 		log.Println("jaowebのダウンロードを行いました。")
 	}
 	log.Println("カレントディレクトリを戻します。")
