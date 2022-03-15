@@ -34,18 +34,24 @@ func main() {
 	checkExistsCommand("git")
 	log.Println("必要なコマンドの存在確認が完了しました。")
 
+	println()
+
 	log.Println(".gitignoreへの除外挿入を行います...")
 	addGitIgnore("jaoweb-viewer*")
 	addGitIgnore("node/")
 	addGitIgnore("jaoweb/")
 	log.Println(".gitignoreへの除外挿入を行いました。")
 
+	println()
+
 	log.Println("node.jsの既ダウンロード済み検索、もしくはダウンロードを行います...")
 	nodepath := downloadNodeJS()
 	log.Println("node.jsの既ダウンロード済み検索、もしくはダウンロードを行いました")
 	log.Println("node.jsのパス: ", nodepath)
 
+	log.Print("node.js version: ")
 	execCommandStdout(nodepath, "--version").Run()
+	println()
 
 	if _, err := os.Stat("jaoweb"); os.IsNotExist(err) {
 		log.Println("jaowebが未ダウンロードのため、git cloneによるダウンロードを行います")
@@ -73,9 +79,11 @@ func main() {
 				log.Fatal(e)
 			}
 		}
+		println()
 		log.Println("jaoweb-docsが未ダウンロードのため、git cloneによるダウンロードを行います。")
 		log.Println("フォーク先のリポジトリをクローンするため、あなたのGitHubアカウント名を入力してください。（事前にフォークする必要があります）")
-		log.Print("あなたのGitHubアカウント名: ")
+		println()
+		print("あなたのGitHubアカウント名: ")
 		var owner string
 		fmt.Scan(&owner)
 
@@ -87,6 +95,8 @@ func main() {
 	}
 	log.Println("カレントディレクトリを戻します。")
 	os.Chdir("../")
+
+	println()
 
 	var npxpath string
 	switch runtime.GOOS {
@@ -109,8 +119,12 @@ func main() {
 		log.Fatal("unsupported platform")
 	}
 
+	println()
+
 	log.Println("カレントディレクトリをjaowebに変更します。")
 	os.Chdir("jaoweb/")
+
+	println()
 
 	log.Println("依存パッケージをダウンロードします。")
 	err := execCommandStdout(npxpath, "yarn", "install").Run()
@@ -119,6 +133,8 @@ func main() {
 		return
 	}
 	log.Println("依存パッケージをダウンロードしました。")
+
+	println()
 
 	log.Println("開発サーバを起動します。")
 	openbrowser("http://localhost:3000")
