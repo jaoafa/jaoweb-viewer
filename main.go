@@ -92,7 +92,20 @@ func main() {
 		log.Println("upstreamリモートを追加します。")
 		execCommandStdout("git", "remote", "add", "upstream", "https://github.com/jaoafa/jaoweb-docs")
 		log.Println("jaowebのダウンロードを行いました。")
+
+		log.Println("authors.jsonとcategories.jsonをダウンロードします。")
+		downloadFile("content/blog/authors.json", "https://raw.githubusercontent.com/jaoafa/jaoweb/master/content/blog/authors.json")
+		downloadFile("content/blog/categories.json", "https://raw.githubusercontent.com/jaoafa/jaoweb/master/content/blog/categories.json")
+		log.Println("authors.jsonとcategories.jsonをダウンロードしました。")
 	}
+
+	log.Println("すべてのリモートからフェッチします。")
+	execCommandStdout("git", "fetch", "--all").Run()
+	os.Chdir("content/")
+	execCommandStdout("git", "fetch", "--all").Run()
+	os.Chdir("../")
+	log.Println("すべてのリモートからフェッチしました。")
+
 	log.Println("カレントディレクトリを戻します。")
 	os.Chdir("../")
 
