@@ -1,5 +1,7 @@
 # jaoweb-viewer (α)
 
+![](.assets/jaoweb-viewer-preview.gif)
+
 [jaoafa/jaoweb-docs](https://github.com/jaoafa/jaoweb-docs) の更新作業時用ビュアー
 
 ## 機能
