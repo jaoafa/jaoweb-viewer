@@ -1,6 +1,6 @@
 module github.com/jaoafa/jaoweb-viewer
 
-go 1.16
+go 1.17
 
 require (
 	github.com/dietsche/rfsnotify v0.0.0-20200716145600-b37be6e4177f // indirect
