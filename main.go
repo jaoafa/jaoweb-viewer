@@ -1,20 +1,32 @@
 package main
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"bufio"
+	"bytes"
+	"compress/gzip"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"os/exec"
 
 	"github.com/dietsche/rfsnotify"
+	"github.com/thoas/go-funk"
 	"gopkg.in/fsnotify.v1"
 )
+
+type SHASUMItem struct {
+	Hash     string
+	FileName string
+}
 
 func main() {
 	// If exists commands
@@ -33,28 +45,67 @@ func main() {
 	log.Println("node.jsの既ダウンロード済み検索、もしくはダウンロードを行いました")
 	log.Println("node.jsのパス: ", nodepath)
 
+	execCommandStdout(nodepath, "--version").Run()
+
 	if _, err := os.Stat("jaoweb"); os.IsNotExist(err) {
 		log.Println("jaowebが未ダウンロードのため、git cloneによるダウンロードを行います")
-		exec.Command("git", "clone", "https://github.com/jaoafa/jaoweb").Run()
+		execCommandStdout("git", "clone", "https://github.com/jaoafa/jaoweb").Run()
 		log.Println("jaowebのダウンロードを行いました。")
 	} else {
 		log.Println("jaowebがダウンロード済みのため、git pullによる更新を行います")
 		os.Chdir("jaoweb/")
-		exec.Command("git", "pull").Run()
+		gitpull := execCommandStdout("git", "pull")
+		gitpull.Stderr = os.Stderr
+		gitpull.Stdout = os.Stdout
+		gitpull.Stdin = os.Stdin
+		gitpull.Run()
 		os.Chdir("../")
 		log.Println("jaowebの更新を行いました。")
 	}
 
-	log.Println("npx.cmdを探します...")
-	npxpath := searchFile("npx.cmd")
-	log.Println("npx.cmdを探しました。")
-	log.Println("npx.cmdのパス: ", npxpath)
+	log.Println("カレントディレクトリをjaowebに変更します。")
+	os.Chdir("jaoweb/")
+	if _, err := os.Stat("content/.git"); os.IsNotExist(err) {
+		if _, err2 := os.Stat("content"); !os.IsNotExist(err2) {
+			log.Println("contentが既に存在するため、削除します。")
+			e := os.RemoveAll("content")
+			if e != nil {
+				log.Fatal(e)
+			}
+		}
+		log.Println("jaoweb-docsが未ダウンロードのため、git cloneによるダウンロードを行います")
+		execCommandStdout("git", "clone", "https://github.com/jaoafa/jaoweb-docs", "content").Run()
+		log.Println("jaowebのダウンロードを行いました。")
+	}
+	log.Println("カレントディレクトリを戻します。")
+	os.Chdir("../")
+
+	var npxpath string
+	switch runtime.GOOS {
+	case "linux":
+		log.Println("npxを探します...")
+		npxpath = searchFile("npx")
+		log.Println("npxを探しました。")
+		log.Println("npxのパス: ", npxpath)
+	case "windows":
+		log.Println("npx.cmdを探します...")
+		npxpath = searchFile("npx.cmd")
+		log.Println("npx.cmdを探しました。")
+		log.Println("npx.cmdのパス: ", npxpath)
+	case "darwin":
+		log.Println("npxを探します...")
+		npxpath = searchFile("npx")
+		log.Println("npxを探しました。")
+		log.Println("npxのパス: ", npxpath)
+	default:
+		log.Fatal("unsupported platform")
+	}
 
 	log.Println("カレントディレクトリをjaowebに変更します。")
 	os.Chdir("jaoweb/")
 
 	log.Println("依存パッケージをダウンロードします。")
-	err := exec.Command(npxpath, "yarn", "install").Run() // Ctrl+Cしたときこのプロセスが残る不具合あり
+	err := execCommandStdout(npxpath, "yarn", "install").Run()
 	if err != nil {
 		log.Fatal(err)
 		return
@@ -62,13 +113,16 @@ func main() {
 	log.Println("依存パッケージをダウンロードしました。")
 
 	log.Println("開発サーバを起動します。")
-	log.Println("Listening on: と表示されたら、表示されたURLにブラウザからアクセスして下さい。")
-	yarndev := exec.Command(npxpath, "yarn", "dev") // Ctrl+Cしたときこのプロセスが残る不具合あり
-	yarndev.Stderr = os.Stderr
-	yarndev.Stdout = os.Stdout
-	yarndev.Stdin = os.Stdin
+	openbrowser("http://localhost:3000")
+	yarndev := execCommandStdout(npxpath, "yarn", "dev")
+	yarndev.Env = append(os.Environ(), "NUXT_TELEMETRY_DISABLED=1")
 	yarndev.Start()
 	defer yarndev.Process.Kill() // Ctrl+Cの場合動作しない？
+
+	if isExistsCommand("code") {
+		cwd, _ := os.Getwd()
+		execCommandStdout("code", filepath.Join(cwd, "content")).Run()
+	}
 
 	watcher, err := rfsnotify.NewWatcher()
 	if err != nil {
@@ -119,6 +173,33 @@ func main() {
 	<-done
 }
 
+func openbrowser(url string) {
+	var err error
+
+	switch runtime.GOOS {
+	case "linux":
+		err = execCommandStdout("xdg-open", url).Start()
+	case "windows":
+		err = execCommandStdout("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		err = execCommandStdout("open", url).Start()
+	default:
+		err = fmt.Errorf("unsupported platform")
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+
+}
+
+func execCommandStdout(name string, arg ...string) *exec.Cmd {
+	command := exec.Command(name, arg...)
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	command.Stdin = os.Stdin
+	return command
+}
+
 func addGitIgnore(str string) {
 	bytes, err := ioutil.ReadFile(".gitignore")
 	if err != nil {
@@ -145,22 +226,75 @@ func isExistsCommand(command string) bool {
 	return err == nil
 }
 
+func parseSHASUM(url string) []SHASUMItem {
+	res, err := http.Get(url)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer res.Body.Close()
+
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var items []SHASUMItem
+
+	buf := bytes.NewBufferString(string(body))
+	scanner := bufio.NewScanner(buf)
+	for scanner.Scan() {
+		line := strings.Split(scanner.Text(), "  ")
+		items = append(items, SHASUMItem{strings.TrimSpace(line[0]), strings.TrimSpace(line[1])})
+	}
+
+	return items
+}
+
+func getOSNodeSuffix() (string, error) {
+	switch runtime.GOOS {
+	case "linux":
+		return "x64.tar.gz", nil
+	case "windows":
+		return "win-x64.zip", nil
+	case "darwin":
+		return "darwin-x64.tar.gz", nil
+	default:
+		return "", fmt.Errorf("unsupported platform")
+	}
+}
+
 func downloadNodeJS() string {
 	if _, err := os.Stat("node"); os.IsNotExist(err) {
 		os.Mkdir("node", 0644)
 	}
 
-	nodepath := searchFile("node.exe")
+	winnodepath := searchFile("node.exe")
+	if winnodepath != "" {
+		return winnodepath
+	}
+
+	nodepath := searchFile("node")
 	if nodepath != "" {
 		return nodepath
 	}
 
-	zippath := "node/node.zip"
-	url := "https://nodejs.org/dist/latest-fermium/node-v14.17.0-win-x64.zip"
-	downloadFile(zippath, url)
+	suffix, err := getOSNodeSuffix()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	zippath := "node/node-" + suffix
+
+	items := parseSHASUM("https://nodejs.org/dist/latest-v14.x/SHASUMS256.txt")
+	var matched SHASUMItem = funk.Find(items, func(item SHASUMItem) bool {
+		return strings.HasSuffix(item.FileName, suffix)
+	}).(SHASUMItem)
+
+	log.Println("node-"+suffix+"をダウンロードします:", "https://nodejs.org/dist/latest-v14.x/"+matched.FileName)
+	downloadFile(zippath, "https://nodejs.org/dist/latest-v14.x/"+matched.FileName)
 
 	distpath := "node/"
-	unzip(zippath, distpath)
+	extract(zippath, distpath)
 
 	nodepath = searchFile("node.exe")
 	if nodepath != "" {
@@ -171,19 +305,22 @@ func downloadNodeJS() string {
 }
 
 func searchFile(filename string) string {
-	var npmpath string
+	var path string
 	filepath.Walk(".", func(ret *string) filepath.WalkFunc {
 		return func(path string, f os.FileInfo, err error) error {
+			if f.IsDir() {
+				return nil
+			}
 			if strings.HasSuffix(f.Name(), filename) {
 				*ret = path
 			}
 			return nil
 		}
-	}(&npmpath))
-	if npmpath != "" {
-		npmpath, _ = filepath.Abs(npmpath)
+	}(&path))
+	if path != "" {
+		path, _ = filepath.Abs(path)
 	}
-	return npmpath
+	return path
 }
 
 func downloadFile(filepath string, url string) error {
@@ -200,6 +337,21 @@ func downloadFile(filepath string, url string) error {
 	defer out.Close()
 
 	_, err = io.Copy(out, resp.Body)
+	return err
+}
+
+func extract(filepath string, distpath string) error {
+	var err error
+	switch runtime.GOOS {
+	case "linux":
+		err = gunzip(filepath, distpath)
+	case "windows":
+		err = unzip(filepath, distpath)
+	case "darwin":
+		err = gunzip(filepath, distpath)
+	default:
+		err = fmt.Errorf("unsupported platform")
+	}
 	return err
 }
 
@@ -234,6 +386,57 @@ func unzip(src, dest string) error {
 		}
 	}
 
+	return nil
+}
+
+func gunzip(src, dest string) error {
+	gzipStream, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+
+	uncompressedStream, err := gzip.NewReader(gzipStream)
+	if err != nil {
+		return err
+	}
+
+	tarReader := tar.NewReader(uncompressedStream)
+
+	for {
+		header, err := tarReader.Next()
+
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			return err
+		}
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			path := filepath.Join(dest, header.Name)
+			if err := os.Mkdir(path, 0755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			path := filepath.Join(dest, header.Name)
+			outFile, err := os.Create(path)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(outFile, tarReader); err != nil {
+				return err
+			}
+			outFile.Close()
+
+		default:
+			return fmt.Errorf(
+				"ExtractTarGz: uknown type: %s in %s",
+				string(header.Typeflag),
+				header.Name)
+		}
+	}
 	return nil
 }
 
